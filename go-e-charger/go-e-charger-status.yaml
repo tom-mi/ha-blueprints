@@ -29,23 +29,23 @@ blueprint:
 
 sensor:
     state: >
-      {% if is_state(input.charger_allowed_to_charge, "off") %}
+      {% if is_state(charger_allowed_to_charge, "off") %}
         Off
       {% else %}
-        {% if states(input.charger_power) | float == 0 %}
+        {% if states(charger_power) | float == 0 %}
           Idle
         {% else %} 
-          Charging ({{ states(input.charger_power / 1000)|round(1) }} kW)
+          Charging ({{ states(charger_power / 1000)|round(1) }} kW)
         {% endif %}
       {% endif %}
       icon: >
-          {% if is_state(input.charger_allowed_to_charge, "off") %}
+          {% if is_state(charger_allowed_to_charge, "off") %}
             mdi:power-plug-off
           {% else %}
-            {% if states(input.charger_power) | float == 0 %}
+            {% if states(charger_power) | float == 0 %}
                 mdi:ev-station
             {% else %} 
-              {% if states(input.charger_logic_mode) == "Eco" %}
+              {% if states(charger_logic_mode) == "Eco" %}
                 mdi:solar-power
               {% else %}
                 mdi:lightning-bolt
