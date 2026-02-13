@@ -1,0 +1,12 @@
+blueprint:
+  name: Go-eCharger High Level Mode
+  description: Set the high level mode of the go-eCharger
+  domain: template
+
+select:
+  options:
+    - "Auto"
+    - "PV"
+    - "11kw"
+    - "5kw"
+    - "Off"

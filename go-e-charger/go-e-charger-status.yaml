@@ -1,0 +1,54 @@
+blueprint:
+  name: Go-eCharger High Level Mode
+  description: Set the high level mode of the go-eCharger
+  domain: template
+  input:
+    charger_allowed_to_charge:
+      name: "Charger allowed to charge"
+      description: "Whether the charger is allowed to charge or not"
+      selector:
+        entity:
+          domain: binary_sensor
+          integration: mqtt
+    charger_power:
+      name: "Charger power"
+      description: "The current total power of the charger in W"
+      selector:
+        entity:
+          domain: sensor
+          integration: mqtt
+          device_class: power
+    charger_logic_mode:
+      name: "Charger logic mode"
+      description: "The current logic mode of the charger"
+      selector:
+        entity:
+          domain: sensor
+          integration: mqtt
+
+
+sensor:
+    state: >
+      {% if is_state(input.charger_allowed_to_charge, "off") %}
+        Off
+      {% else %}
+        {% if states(input.charger_power) | float == 0 %}
+          Idle
+        {% else %} 
+          Charging ({{ states(input.charger_power / 1000)|round(1) }} kW)
+        {% endif %}
+      {% endif %}
+      icon: >
+          {% if is_state(input.charger_allowed_to_charge, "off") %}
+            mdi:power-plug-off
+          {% else %}
+            {% if states(input.charger_power) | float == 0 %}
+                mdi:ev-station
+            {% else %} 
+              {% if states(input.charger_logic_mode) == "Eco" %}
+                mdi:solar-power
+              {% else %}
+                mdi:lightning-bolt
+              {% endif %} 
+            {% endif %}
+          {% endif %}
