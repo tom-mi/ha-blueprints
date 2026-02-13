@@ -1,0 +1,43 @@
+blueprint:
+  name: Restart addon with stale data
+  domain: automation
+  input:
+    restart_after_seconds:
+      name: Restart after seconds
+      description: Duration of missing data after which to restart the addon
+      selector:
+        number:
+          min: 300
+          max: 3600
+          unit_of_measurement: seconds
+    monitor_entity:
+      name: Monitor entity
+      description: Entity to monitor for stale data
+      selector:
+        entity:
+          multiple: false
+    target_addon:
+      name: Add-on to restart
+      selector:
+        addon:
+    additional_actions:
+      name: Additional actions
+      description: Additional actions to perform after the restart, e.g. notifications
+      selector:
+        action:
+
+triggers:
+  - trigger: time_pattern
+    minutes: "/5"
+
+condition:
+  condition: template
+  value_template: "{{ as_timestamp(now()) - as_timestamp(states['!input monitor_entity'].last_reported) > !input restart_after_seconds }}"
+
+actions:
+  - action: hassio.addon_restart
+    data:
+      addon: !input target_addon
+  - alias: Run additional actions after restart
+    choose: []
+    default: !input additional_actions
