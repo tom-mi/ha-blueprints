@@ -26,26 +26,31 @@ blueprint:
           domain: sensor
           integration: mqtt
 
+variables:
+  input_charger_allowed_to_charge: !input charger_allowed_to_charge
+  input_charger_power: !input charger_power
+  input_charger_logic_mode: !input charger_logic_mode
+
 
 sensor:
     state: >
-      {% if is_state(charger_allowed_to_charge, "off") %}
+      {% if is_state(input_charger_allowed_to_charge, "off") %}
         Off
       {% else %}
-        {% if states(charger_power) | float == 0 %}
+        {% if states(input_charger_power) | float == 0 %}
           Idle
         {% else %} 
-          Charging ({{ states(charger_power / 1000)|round(1) }} kW)
+          Charging ({{ states(input_charger_power / 1000)|round(1) }} kW)
         {% endif %}
       {% endif %}
       icon: >
-          {% if is_state(charger_allowed_to_charge, "off") %}
+          {% if is_state(input_charger_allowed_to_charge, "off") %}
             mdi:power-plug-off
           {% else %}
-            {% if states(charger_power) | float == 0 %}
+            {% if states(input_charger_power) | float == 0 %}
                 mdi:ev-station
             {% else %} 
-              {% if states(charger_logic_mode) == "Eco" %}
+              {% if states(input_charger_logic_mode) == "Eco" %}
                 mdi:solar-power
               {% else %}
                 mdi:lightning-bolt
