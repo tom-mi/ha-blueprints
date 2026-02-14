@@ -41,4 +41,7 @@ select:
     {% else %}
       mdi:lightning-bolt
     {% endif %}
-  select_option: []
+  select_option:
+    - action: notify.notify
+      data:
+        message: "foo bar"
