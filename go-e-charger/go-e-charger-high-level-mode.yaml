@@ -41,3 +41,4 @@ select:
     {% else %}
       mdi:lightning-bolt
     {% endif %}
+  select_option: []
