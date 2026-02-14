@@ -4,6 +4,21 @@ blueprint:
   domain: template
 
   input:
+    mode_input:
+      name: "Mode input"
+      description: |
+        A `text_input` which is needed to store the current mode in a proper way.
+        This is only used by this template sensor and is not intended to be included in the UI.
+        Create an empty input text, e.g. like this:
+        ```yaml
+        input_text:
+          wallbox_mode_internal:
+            name: "Wallbox mode"
+        ```
+
+      selector:
+        entity:
+          domain: input_text
     power_levels:
       name: "Power levels"
       description: |
@@ -27,21 +42,24 @@ blueprint:
 
 variables:
   input_power_levels: !input power_levels
+  input_mode_input: !input mode_input
 
 
 select:
   options: '{{ ["Auto", "PV", "Off"] + input_power_levels }}'
+  state: "{{ states(input_mode_input) }}"
   icon: >
-    {% if this.state == "Off" %}
+    {% if is_state(input_mode_input, "Off") %}
       mdi:power-plug-off
-    {% elif this.state == "Auto" %}
-      mdi:auto-fix
-    {% elif this.state == "PV" %}
+    {% elif is_state(input_mode_input, "Auto") %}
+      mdi:solar-power
+    {% elif is_state(input_mode_input, "PV") %}
       mdi:solar-power
     {% else %}
       mdi:lightning-bolt
     {% endif %}
   select_option:
-    - action: notify.notify
+    - service: input_text.set_value
       data:
-        message: "foo bar"
+        entity_id: !input mode_input
+        value: "{{ option }}"

@@ -33,8 +33,18 @@ variables:
 
 
 sensor:
-    state: >
-      {% if is_state(input_charger_allowed_to_charge, "off") %}
+  state: >
+    {% if states(input_charger_power) in ["unknown", "unavailable"] %}
+      {{ states(input_charger_power) }}
+    {% else %}
+      {{ ((states(input_charger_power) | float) / 1000) | round(1) }}
+    {% endif %}
+  unit_of_measurement: "kW"
+  attributes:
+    info: >
+      {% if states(input_charger_power) in ["unknown", "unavailable"] %}
+        {{ states(input_charger_power) }}
+      {% elif is_state(input_charger_allowed_to_charge, "off") %}
         Off
       {% else %}
         {% if states(input_charger_power) | float == 0 %}
@@ -43,17 +53,20 @@ sensor:
           Charging ({{ states(input_charger_power / 1000)|round(1) }} kW)
         {% endif %}
       {% endif %}
-    icon: >
-        {% if is_state(input_charger_allowed_to_charge, "off") %}
-          mdi:power-plug-off
+
+  icon: >
+    {% if states(input_charger_power) in ["unknown", "unavailable"] %}
+        mdi:alert
+    {% elif is_state(input_charger_allowed_to_charge, "off") %}
+      mdi:power-plug-off
+    {% else %}
+      {% if states(input_charger_power) | float == 0 %}
+          mdi:power-standby
+      {% else %} 
+        {% if states(input_charger_logic_mode) == "Eco" %}
+          mdi:solar-power
         {% else %}
-          {% if states(input_charger_power) | float == 0 %}
-              mdi:ev-station
-          {% else %} 
-            {% if states(input_charger_logic_mode) == "Eco" %}
-              mdi:solar-power
-            {% else %}
-              mdi:lightning-bolt
-            {% endif %} 
-          {% endif %}
-        {% endif %}
+          mdi:lightning-bolt
+        {% endif %} 
+      {% endif %}
+    {% endif %}
