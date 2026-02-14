@@ -31,3 +31,13 @@ variables:
 
 select:
   options: '{{ ["Auto", "PV", "Off"] + input_power_levels }}'
+  icon: >
+    {% if this.state == "Off" %}
+      mdi:power-plug-off
+    {% elif this.state == "Auto" %}
+      mdi:auto-fix
+    {% elif this.state == "PV" %}
+      mdi:solar-power
+    {% else %}
+      mdi:lightning-bolt
+    {% endif %}
