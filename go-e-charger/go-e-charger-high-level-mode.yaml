@@ -3,23 +3,23 @@ blueprint:
   description: Set the high level mode of the go-eCharger
   domain: template
 
-input:
-  power_levels:
-    name: "Power levels"
-    description: |
-      List of power levels for setting a static level.
-      If you add custom values in addition to the predefined ones, you need to map them to phase & current in the
-      when using the `go-e-charger-automation.yaml` blueprint (using the `power_level_mapping` input).
-      Defaults to "5.5 kW", "11 kW".
-    selector:
-      select:
-        options:
-          - "1.4 kW"
-          - "5.5 kW"
-          - "11 kW"
-          - "22 kW"
-      multiple: true
-      custom_value: true
+  input:
+    power_levels:
+      name: "Power levels"
+      description: |
+        List of power levels for setting a static level.
+        If you add custom values in addition to the predefined ones, you need to map them to phase & current in the
+        when using the `go-e-charger-automation.yaml` blueprint (using the `power_level_mapping` input).
+        Defaults to "5.5 kW", "11 kW".
+      selector:
+        select:
+          options:
+            - "1.4 kW"
+            - "5.5 kW"
+            - "11 kW"
+            - "22 kW"
+          multiple: true
+          custom_value: true
       default:
         - "5.5 kW"
         - "11 kW"
