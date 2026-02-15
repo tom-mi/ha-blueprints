@@ -28,22 +28,38 @@ blueprint:
       name: "Charging from grid allowed"
       description: |
         Whether charging from the grid is currently allowed. Only relevant if the `mode_input` is in "Auto" mode.
+        Defaults to `false` if not set.
       selector:
         entity:
           domain:
             - input_boolean
             - binary_sensor
-      default: false
+      default:
     charging_from_pv_allowed:
       name: "Charging from PV allowed"
       description: |
         Whether charging from excess PV power is allowed or not. Only relevant if `mode_input` is in "Auto" mode.
+        Defaults to `true` if not set.
       selector:
         entity:
           domain:
             - input_boolean
             - binary_sensor
-      default: true
+      default:
+    auto_power_level:
+      name: "Auto power level"
+      description: |
+        The power level to use when in "Auto" mode. This is needed to determine the current and phase settings for the
+        charger when in "Auto" mode.
+      selector:
+        select:
+          custom_value: true
+          options:
+            - "1.4 kW"
+            - "5.5 kW"
+            - "11 kW"
+            - "22 kW"
+      default: "11 kW"
     power_level_mapping:
       name: "Power levels"
       description: |
@@ -100,8 +116,42 @@ variables:
   input_charging_from_grid_allowed: !input charging_from_grid_allowed
   input_charging_from_pv_allowed: !input charging_from_pv_allowed
   input_power_level_mapping: !input power_level_mapping
-  
+  input_auto_power_level: !input auto_power_level
 
+  mode: '{{ states(input_mode_input) }}'
+  is_charging_from_grid_allowed: >
+    {%- if input_charging_from_grid_allowed -%}
+       {{ states(input_charging_from_grid_allowed) }}
+    {%- else -%}
+       false
+    {%- endif -%}
+  is_charging_from_pv_allowed: >
+    {%- if input_charging_from_pv_allowed -%}
+       {{ states(input_charging_from_pv_allowed) }}
+    {%- else -%}
+       true
+    {%- endif -%}
+  phase_and_current_from_mode: >
+   {% if mode == "Auto" %}
+    {% set mapping = (input_power_level_mapping | selectattr("name", "equalto", input_auto_power_level) | list | first) %}
+   {% elif mode in ["PV", "Off"] %}
+    {% set mapping = None %}
+   {% else %}
+    {% set mapping = (input_power_level_mapping | selectattr("name", "equalto", mode) | list | first) %}
+   {% endif %}
+   {% if mapping is not none %}
+     {% set phases = mapping.phases %}
+     {% set current = mapping.current %}
+   {% else %}
+     {% set phases = "auto" %}
+     {% set current = 0 %}
+   {% endif %}
+   {% if phases == "single" %}
+     {% set psm = 1 %}
+   {% else %}
+     {% set psm = 2 %}
+   {% endif %}
+   { "psm": {{ psm }}, "amp": {{ current }} }
 
 
 trigger:
@@ -110,34 +160,30 @@ trigger:
 
 
 action:
+  - action: mqtt.publish
+    data:
+      topic: 'debug'
+      payload: >
+          Mode: {{ mode }}
+          Input power level mapping: {{ input_power_level_mapping }}
+          Charging from grid allowed: {{ is_charging_from_grid_allowed }}
+          Charging from PV allowed: {{ is_charging_from_pv_allowed }}
+          Phase and current from mode: {{ phase_and_current_from_mode }}
   - choose:
       - conditions:
           - condition: or
             conditions:
-              - '{{ is_state(input_mode_input, "Auto") and input_charging_from_grid_allowed }}'
-              - '{{ (not is_state(input_mode_input, "Auto")) and states(input_mode_input) in input_power_level_mapping | map(attribute="name") | list }}'
+              - '{{ mode == "Auto" and is_charging_from_grid_allowed }}'
+              - '{{ mode != "Auto" and mode in (input_power_level_mapping | map(attribute="name") | list) }}'
         sequence:
           - action: mqtt.publish
             data:
               topic: '{{ input_mqtt_prefix }}/psm/set' # Phase switch mode: 0 = auto, 1 = force single phase, 2 = force three phase
-              payload: >
-                {% if input_power_level_mapping | selectattr("name", "equalto", states(input_mode_input)) | list | length > 0 %}
-                    {% set phases = input_power_level_mapping | selectattr("name", "equalto", states(input_mode_input)) | map(attribute="phases") | first %}
-                {% else %}
-                    {% set phases = "auto" %}
-                {% endif %}
-                {% if phases == "single" %}
-                    1
-                {% elif phases == "auto" %}
-                    0
-                {% else %}
-                    0
-                {% endif %}
+              payload: '{{ phase_and_current_from_mode.psm }}'
           - action: mqtt.publish
             data:
               topic: '{{ input_mqtt_prefix }}/amp/set'
-              payload: >-
-                {{ input_power_level_mapping | selectattr('name', 'equalto', states(input_mode_input)) | map(attribute='current') | first }}
+              payload: '{{ phase_and_current_from_mode.amp }}'
           - action: mqtt.publish
             data:
               topic: '{{ input_mqtt_prefix }}/frc/set'
@@ -153,8 +199,8 @@ action:
       - conditions:
           condition: or
           conditions:
-            - '{{ is_state(input_mode_input, "PV") }}'
-            - '{{ is_state(input_mode_input, "Auto") and input_charging_from_pv_allowed }}'
+            - '{{ mode == "PV" }}'
+            - '{{ mode == "Auto" and is_charging_from_pv_allowed }}'
         sequence:
           - action: mqtt.publish
             data:

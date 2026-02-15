@@ -50,7 +50,7 @@ sensor:
         {% if states(input_charger_power) | float == 0 %}
           Idle
         {% else %} 
-          Charging ({{ states(input_charger_power / 1000)|round(1) }} kW)
+          Charging ({{ ((states(input_charger_power) | float) / 1000)|round(1) }} kW)
         {% endif %}
       {% endif %}
 
