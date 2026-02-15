@@ -1,0 +1,179 @@
+blueprint:
+  name: Go-eCharger Automation
+  description: Automation to control a go-eCharger based on a high level mode
+  domain: automation
+  input:
+    mode_input:
+      name: "Mode input"
+      description: |
+        A `text_input` which is needed to store the current mode in a proper way.
+        This is only used by this template sensor and is not intended to be included in the UI.
+        Create an empty input text, e.g. like this:
+        ```yaml
+        input_text:
+          wallbox_mode_internal:
+            name: "Wallbox mode"
+        ```
+      selector:
+        entity:
+          domain: input_text
+    mqtt_prefix:
+      name: "MQTT prefix"
+      description: |
+        The MQTT topic prefix used by the go-eCharger MQTT integration. This is needed to determine the correct topics
+        for controlling the charger, e.g. `/go-eCharger/123456`
+      selector:
+        text:
+    charging_from_grid_allowed:
+      name: "Charging from grid allowed"
+      description: |
+        Whether charging from the grid is currently allowed. Only relevant if the `mode_input` is in "Auto" mode.
+      selector:
+        entity:
+          domain:
+            - input_boolean
+            - binary_sensor
+      default: false
+    charging_from_pv_allowed:
+      name: "Charging from PV allowed"
+      description: |
+        Whether charging from excess PV power is allowed or not. Only relevant if `mode_input` is in "Auto" mode.
+      selector:
+        entity:
+          domain:
+            - input_boolean
+            - binary_sensor
+      default: true
+    power_level_mapping:
+      name: "Power levels"
+      description: |
+        List of power levels for setting a static level.
+        If you add custom values in addition to the predefined ones, you need to map them to phase & current in the
+        when using the `go-e-charger-automation.yaml` blueprint (using the `power_level_mapping` input).
+      selector:
+        object:
+          multiple: true
+          label_field: name
+          fields:
+            name:
+              label: "Name of the power level, e.g. '5.5 kW'"
+              required: true
+              selector:
+                text:
+            phases:
+              label: "Phase switch mode"
+              required: true
+              selector:
+                select:
+                  options:
+                    - single
+                    - auto
+            current:
+              label: "Current in Ampere"
+              required: true
+              selector:
+                number:
+                  min: 6
+                  max: 32
+                  step: 1
+      default:
+        - name: "1.4 kW"
+          phases: single
+          current: 6
+        - name: "5.5 kW"
+          phases: auto
+          current: 8
+        - name: "11 kW"
+          phases: auto
+          current: 16
+        - name: "22 kW"
+          phases: auto
+          current: 32
+        - name: "Auto"
+          phases: auto
+          current: 16
+
+
+variables:
+  input_mode_input: !input mode_input
+  input_mqtt_prefix: !input mqtt_prefix
+  input_charging_from_grid_allowed: !input charging_from_grid_allowed
+  input_charging_from_pv_allowed: !input charging_from_pv_allowed
+  input_power_level_mapping: !input power_level_mapping
+  
+
+
+
+trigger:
+  - platform: state
+    entity_id: !input mode_input
+
+
+action:
+  - choose:
+      - conditions:
+          - condition: or
+            conditions:
+              - '{{ is_state(input_mode_input, "Auto") and input_charging_from_grid_allowed }}'
+              - '{{ (not is_state(input_mode_input, "Auto")) and states(input_mode_input) in input_power_level_mapping | map(attribute="name") | list }}'
+        sequence:
+          - action: mqtt.publish
+            data:
+              topic: '{{ input_mqtt_prefix }}/psm/set' # Phase switch mode: 0 = auto, 1 = force single phase, 2 = force three phase
+              payload: >
+                {% if input_power_level_mapping | selectattr("name", "equalto", states(input_mode_input)) | list | length > 0 %}
+                    {% set phases = input_power_level_mapping | selectattr("name", "equalto", states(input_mode_input)) | map(attribute="phases") | first %}
+                {% else %}
+                    {% set phases = "auto" %}
+                {% endif %}
+                {% if phases == "single" %}
+                    1
+                {% elif phases == "auto" %}
+                    0
+                {% else %}
+                    0
+                {% endif %}
+          - action: mqtt.publish
+            data:
+              topic: '{{ input_mqtt_prefix }}/amp/set'
+              payload: >-
+                {{ input_power_level_mapping | selectattr('name', 'equalto', states(input_mode_input)) | map(attribute='current') | first }}
+          - action: mqtt.publish
+            data:
+              topic: '{{ input_mqtt_prefix }}/frc/set'
+              payload: '0' # Force state Neutral
+          - action: mqtt.publish
+            data:
+              topic: '{{ input_mqtt_prefix }}/fup/set'
+              payload: '0' # Do net use PV surplus
+          - action: mqtt.publish
+            data:
+              topic: '{{ input_mqtt_prefix }}/lmo/set'
+              payload: '3' # Set logic mode to "Default"
+      - conditions:
+          condition: or
+          conditions:
+            - '{{ is_state(input_mode_input, "PV") }}'
+            - '{{ is_state(input_mode_input, "Auto") and input_charging_from_pv_allowed }}'
+        sequence:
+          - action: mqtt.publish
+            data:
+              topic: '{{ input_mqtt_prefix }}/frc/set'
+              payload: '0' # Force state Neutral
+          - action: mqtt.publish
+            data:
+              topic: '{{ input_mqtt_prefix }}/fup/set'
+              payload: '1' # Use PV surplus
+          - action: mqtt.publish
+            data:
+              topic: '{{ input_mqtt_prefix }}/psm/set'
+              payload: '0'  # Phase switch mode Auto
+          - action: mqtt.publish
+            data:
+              topic: '{{ input_mqtt_prefix }}/lmo/set'
+              payload: '4' # Set logic mode to "Eco"
+    default:
+      - action: mqtt.publish
+        data:
+          topic: '{{ input_mqtt_prefix }}/frc/set'
+          payload: 1 # Off

@@ -15,7 +15,6 @@ blueprint:
           wallbox_mode_internal:
             name: "Wallbox mode"
         ```
-
       selector:
         entity:
           domain: input_text
@@ -52,7 +51,7 @@ select:
     {% if is_state(input_mode_input, "Off") %}
       mdi:power-plug-off
     {% elif is_state(input_mode_input, "Auto") %}
-      mdi:solar-power
+      mdi:auto-fix
     {% elif is_state(input_mode_input, "PV") %}
       mdi:solar-power
     {% else %}

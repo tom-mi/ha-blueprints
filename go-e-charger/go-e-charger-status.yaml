@@ -1,6 +1,6 @@
 blueprint:
-  name: Go-eCharger High Level Mode
-  description: Set the high level mode of the go-eCharger
+  name: Go-eCharger Status
+  description: Show the current status of the go-e Charger in a compact way
   domain: template
   input:
     charger_allowed_to_charge:
