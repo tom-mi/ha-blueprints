@@ -1,5 +1,5 @@
 blueprint:
-  name: Go-eCharger Automation
+  name: Go-e Charger Automation
   description: Automation to control a go-eCharger based on a high level mode
   domain: automation
   input:
@@ -46,6 +46,18 @@ blueprint:
             - input_boolean
             - binary_sensor
       default:
+    reset_to_auto_after:
+        name: "Reset to Auto after"
+        description: |
+            Whether to reset the mode back to "Auto" after a certain time. This can be useful if you want to temporarily
+            set the mode to "Off" or a static power level and want it to automatically switch back to "Auto" after a while.
+            Set to 00:00:00 to disable the reset.
+        selector:
+          duration:
+        default:
+          hours: 12
+          minutes: 0
+          seconds: 00
     auto_power_level:
       name: "Auto power level"
       description: |
@@ -117,17 +129,18 @@ variables:
   input_charging_from_pv_allowed: !input charging_from_pv_allowed
   input_power_level_mapping: !input power_level_mapping
   input_auto_power_level: !input auto_power_level
+  input_reset_to_auto_after: !input reset_to_auto_after
 
   mode: '{{ states(input_mode_input) }}'
   is_charging_from_grid_allowed: >
     {%- if input_charging_from_grid_allowed -%}
-       {{ states(input_charging_from_grid_allowed) }}
+       {{ states(input_charging_from_grid_allowed) == 'on' }}
     {%- else -%}
        false
     {%- endif -%}
   is_charging_from_pv_allowed: >
     {%- if input_charging_from_pv_allowed -%}
-       {{ states(input_charging_from_pv_allowed) }}
+       {{ states(input_charging_from_pv_allowed) == 'on' }}
     {%- else -%}
        true
     {%- endif -%}
@@ -152,24 +165,46 @@ variables:
      {% set psm = 2 %}
    {% endif %}
    { "psm": {{ psm }}, "amp": {{ current }} }
+  reset_to_auto_seconds: >-
+    {%- if input_reset_to_auto_after.hours == 0 and input_reset_to_auto_after.minutes == 0 and input_reset_to_auto_after.seconds == 0 -%}
+      0
+    {%- else -%}
+      {{ timedelta(**input_reset_to_auto_after).total_seconds() }}
+    {%- endif -%}
+  duration_in_current_mode_seconds: >
+    {{ (now() - states[input_mode_input].last_changed).total_seconds() }}
 
 
 trigger:
   - platform: state
     entity_id: !input mode_input
 
+  # Check regularly if we need to reset to Auto mode or if we are in Auto mode and the conditions have changed
+  - platform: time_pattern
+    minutes: '/5'
 
 action:
   - action: mqtt.publish
     data:
-      topic: 'debug'
-      payload: >
-          Mode: {{ mode }}
-          Input power level mapping: {{ input_power_level_mapping }}
-          Charging from grid allowed: {{ is_charging_from_grid_allowed }}
-          Charging from PV allowed: {{ is_charging_from_pv_allowed }}
+      topic: 'go-e-charger-automation/debug'
+      payload: |
+          --- debug info of go-eCharger automation ----------------------------
+          Mode:                        {{ mode }}
+          Input power level mapping:   {{ input_power_level_mapping }}
+          Charging from grid allowed:  {{ is_charging_from_grid_allowed }}
+          Charging from PV allowed:    {{ is_charging_from_pv_allowed }}
           Phase and current from mode: {{ phase_and_current_from_mode }}
+          Reset to auto time:          {{ reset_to_auto_seconds }}
+          Duration in current mode:    {{ duration_in_current_mode_seconds }}
+          Reset to auto:               {{ mode != "Auto" and reset_to_auto_seconds > 0 and duration_in_current_mode_seconds > reset_to_auto_seconds }}
+          ---------------------------------------------------------------------
   - choose:
+      - conditions: '{{ mode != "Auto" and reset_to_auto_seconds > 0 and duration_in_current_mode_seconds > reset_to_auto_seconds }}'
+        sequence:
+          - action: input_text.set_value
+            data:
+              entity_id: !input mode_input
+              value: "Auto"
       - conditions:
           - condition: or
             conditions:

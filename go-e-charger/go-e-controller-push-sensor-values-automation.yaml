@@ -1,0 +1,157 @@
+blueprint:
+  name: Go-e Controller Push Sensor Values
+  description: |
+    Push sensor values from Home Assistant to the go-eController via MQTT using the not-really-documented
+    API key `ecp` (`ecp/set`).
+    
+    If a sensor is left empty, the automation will send `null` for the corresponding value.
+    
+    See also https://github.com/goecharger/go-eController-API/issues/14#issuecomment-2595713130
+  domain: automation
+  input:
+    mqtt_prefix:
+      name: "MQTT prefix"
+      description: |
+        The MQTT topic prefix used by the go-eController MQTT integration. This is needed to determine the correct topics
+        for sending data to the controller, e.g. `/go-eController/123456`
+      selector:
+        text:
+
+    power_from_grid:
+      name: Power from grid
+      description: |
+        The power retrieved from the grid.
+        Positive if power is imported from the grid, negative if power is exported into the grid.
+      selector:
+        entity:
+          domain: sensor
+          device_class: power
+      default:
+    invert_power_from_grid:
+      name: Invert power from grid
+      description: If selected, the `power_from_grid` value will be multiplied by `-1`.
+      selector:
+        boolean:
+      default: false
+    power_home:
+      name: Power home
+      description: The total power consumption of the home.
+      selector:
+        entity:
+          domain: sensor
+          device_class: power
+      default:
+    power_from_pv:
+      name: Power from PV
+      description: The power retrieved from the PV system.
+      selector:
+        entity:
+          domain: sensor
+          device_class: power
+      default:
+    power_from_battery:
+      name: Power from battery
+      description: |
+        The power retrieved from the battery.
+        Positive if the battery is discharging, negative if the battery is charging.
+      selector:
+        entity:
+          domain: sensor
+          device_class: power
+      default:
+    invert_power_from_battery:
+      name: Invert power from battery
+      description: If selected, the `power_from_battery` value will be multiplied by `-1`.
+      selector:
+        boolean:
+      default: false
+
+variables:
+  input_mqtt_prefix: !input mqtt_prefix
+  input_power_from_grid: !input power_from_grid
+  input_invert_power_from_grid: !input invert_power_from_grid
+  input_power_home: !input power_home
+  input_power_from_pv: !input power_from_pv
+  input_power_from_battery: !input power_from_battery
+  input_invert_power_to_battery: !input invert_power_from_battery
+
+  power_from_grid: >
+    {% set sensor = input_power_from_grid %}
+    {% set invert = input_invert_power_from_grid %}
+    {% if sensor is not none and (states(sensor) | is_number) %}
+      {{ (states(sensor) | float) * (-1 if invert else 1) }}
+    {% else %}
+      null
+    {% endif %}
+  power_home: >
+    {% set sensor = input_power_home %}
+    {% if sensor is not none and (states(sensor) | is_number) %}
+      {{ states(sensor) | float }}
+    {% else %}
+      null
+    {% endif %}
+  power_from_pv: >
+    {% set sensor = input_power_from_pv %}
+    {% set invert = false %}
+    {% if sensor is not none and (states(sensor) | is_number) %}
+      {{ (states(sensor) | float) * (-1 if invert else 1) }}
+    {% else %}
+      null
+    {% endif %}
+  power_from_battery: >
+    {% set sensor = input_power_from_battery %}
+    {% set invert = input_invert_power_to_battery %}
+    {% if sensor is not none and (states(sensor) | is_number) %}
+      {{ (states(sensor) | float) * (-1 if invert else 1) }}
+    {% else %}
+      null
+    {% endif %}
+
+trigger:
+  - platform: time_pattern
+    seconds: '/10'
+
+# See also https://github.com/goecharger/go-eController-API/issues/14#issuecomment-2595713130
+# default content of ccn key:
+#[
+#  "Home",
+#  "Grid",
+#  "Car",
+#  "Relais",
+#  "Solar",
+#  "Akku",
+#  "Custom 1",
+#  "Custom 2",
+#  "Custom 3",
+#  "Custom 4",
+#  "Custom 5",
+#  "Custom 6",
+#  "Custom 7",
+#  "Custom 8",
+#  "Custom 9",
+#  "Custom 10",
+#  ]
+
+action:
+  - service: mqtt.publish
+    data:
+      topic: '{{ input_mqtt_prefix }}/ecp/set'
+      payload: >
+        [
+          {{ power_home }},
+          {{ power_from_grid }},
+          null,
+          null,
+          {{ power_from_pv }},
+          {{ power_from_battery }},
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null
+        ]
