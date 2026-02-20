@@ -25,11 +25,19 @@ blueprint:
         entity:
           domain: sensor
           integration: mqtt
+    charger_car_state:
+      name: "Charger car state"
+      description: "The current car state of the charger"
+      selector:
+        entity:
+          domain: sensor
+          integration: mqtt
 
 variables:
   input_charger_allowed_to_charge: !input charger_allowed_to_charge
   input_charger_power: !input charger_power
   input_charger_logic_mode: !input charger_logic_mode
+  input_charger_car_state: !input charger_car_state
 
 
 sensor:
@@ -40,33 +48,44 @@ sensor:
       {{ ((states(input_charger_power) | float) / 1000) | round(1) }}
     {% endif %}
   unit_of_measurement: "kW"
+  # options: Unknown, Idle, Charging, WaitCar, Complete, Error
   attributes:
     info: >
-      {% if states(input_charger_power) in ["unknown", "unavailable"] %}
-        {{ states(input_charger_power) }}
-      {% elif is_state(input_charger_allowed_to_charge, "off") %}
-        Off
-      {% else %}
-        {% if states(input_charger_power) | float == 0 %}
-          Idle
-        {% else %} 
-          Charging ({{ ((states(input_charger_power) | float) / 1000)|round(1) }} kW)
+      {% if states(input_charger_car_state) == "Idle" %}
+        No car connected
+      {% elif states(input_charger_car_state) == "WaitCar" %}
+        Waiting for car
+      {% elif states(input_charger_car_state) == "Charging" %}
+        Charging ({{ ((states(input_charger_power) | float(0)) / 1000)|round(1) }} kW)
+      {% elif states(input_charger_car_state) == "Complete" %}
+        {% if states(input_charger_allowed_to_charge) == "on" %}
+          Completed
+        {% else %}
+          Not allowed to charge
         {% endif %}
+      {% else %}
+        {{ states(input_charger_car_state) }}
       {% endif %}
 
   icon: >
-    {% if states(input_charger_power) in ["unknown", "unavailable"] %}
-        mdi:alert
-    {% elif is_state(input_charger_allowed_to_charge, "off") %}
-      mdi:power-plug-off
-    {% else %}
-      {% if states(input_charger_power) | float == 0 %}
-          mdi:power-standby
-      {% else %} 
+    {% if states(input_charger_car_state) == "Error" %}
+      mdi:alert-circle
+    {% elif states(input_charger_car_state) == "Idle" %}
+      mdi:car-off
+    {% elif states(input_charger_car_state) == "WaitCar" %}
+      mdi:timer-sand
+    {% elif states(input_charger_car_state) == "Charging" %}
         {% if states(input_charger_logic_mode) == "Eco" %}
           mdi:solar-power
         {% else %}
           mdi:lightning-bolt
         {% endif %} 
+    {% elif states(input_charger_car_state) == "Complete" %}
+      {% if states(input_charger_allowed_to_charge) == "on" %}
+        mdi:check-circle
+      {% else %}
+         mdi:power-plug-off
       {% endif %}
+    {% else %}
+        mdi:alert
     {% endif %}
