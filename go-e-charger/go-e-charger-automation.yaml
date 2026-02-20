@@ -162,7 +162,7 @@ variables:
    {% if phases == "single" %}
      {% set psm = 1 %}
    {% else %}
-     {% set psm = 2 %}
+     {% set psm = 0 %}
    {% endif %}
    { "psm": {{ psm }}, "amp": {{ current }} }
   reset_to_auto_seconds: >-
