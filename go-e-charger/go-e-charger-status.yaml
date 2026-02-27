@@ -54,7 +54,11 @@ sensor:
       {% if states(input_charger_car_state) == "Idle" %}
         No car connected
       {% elif states(input_charger_car_state) == "WaitCar" %}
-        Waiting for car
+        {% if states(input_charger_allowed_to_charge) == "on" %}
+          Waiting for car
+        {% else %}
+          Not allowed to charge
+        {% endif %}
       {% elif states(input_charger_car_state) == "Charging" %}
         Charging ({{ ((states(input_charger_power) | float(0)) / 1000)|round(1) }} kW)
       {% elif states(input_charger_car_state) == "Complete" %}
@@ -73,7 +77,11 @@ sensor:
     {% elif states(input_charger_car_state) == "Idle" %}
       mdi:car-off
     {% elif states(input_charger_car_state) == "WaitCar" %}
-      mdi:timer-sand
+      {% if states(input_charger_allowed_to_charge) == "on" %}
+        mdi:timer-sand
+      {% else %}
+         mdi:power-plug-off
+      {% endif %}
     {% elif states(input_charger_car_state) == "Charging" %}
         {% if states(input_charger_logic_mode) == "Eco" %}
           mdi:solar-power
