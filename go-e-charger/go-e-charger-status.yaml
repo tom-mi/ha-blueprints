@@ -70,6 +70,32 @@ sensor:
       {% else %}
         {{ states(input_charger_car_state) }}
       {% endif %}
+    icon_color: >
+      {% if states(input_charger_car_state) == "Error" %}
+        orange
+      {% elif states(input_charger_car_state) == "Idle" %}
+        gray
+      {% elif states(input_charger_car_state) == "WaitCar" %}
+        {% if states(input_charger_allowed_to_charge) == "on" %}
+          aqua
+        {% else %}
+           red
+        {% endif %}
+      {% elif states(input_charger_car_state) == "Charging" %}
+          {% if states(input_charger_logic_mode) == "Eco" %}
+            lime
+          {% else %}
+            yellow
+          {% endif %}
+      {% elif states(input_charger_car_state) == "Complete" %}
+        {% if states(input_charger_allowed_to_charge) == "on" %}
+          green
+        {% else %}
+           red
+        {% endif %}
+      {% else %}
+          mdi:alert
+      {% endif %}
 
   icon: >
     {% if states(input_charger_car_state) == "Error" %}
