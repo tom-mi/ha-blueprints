@@ -1,0 +1,104 @@
+blueprint:
+  name: evcc Reset Modes automation
+  description: |
+    * Reset the mode of a loadpoint to "PV" after a given interval
+    * Reset the battery boost mode to "Off" after a given interval
+    
+    This is built to be compatible with the [ha-evcc](https://github.com/marq24/ha-evcc) integration,
+    but probably also works with a custom MQTT setup.
+  domain: automation
+
+  input:
+    loadpoint_mode_select:
+      name: Loadpoint mode select
+      description: |
+        The `select` choosing between the loadpoint modes `off`, `pv`, `minpv` and `now`.
+        You can add multiple loadpoints, and omit those you don't want to reset automatically.
+      selector:
+        object:
+          multiple: true
+          label_field: entity
+          fields:
+            entity:
+              label: "Loadpoint mode select entity"
+              required: true
+              selector:
+                entity:
+                  domain: select
+      default: [ ]
+    loadpoint_mode_reset_interval:
+      name: Loadpoint mode reset interval
+      description: The time after which the loadpoint mode should be reset to `pv`
+      selector:
+        duration:
+      default:
+        hours: 12
+        minutes: 0
+        seconds: 0
+    battery_boost_mode_switch:
+      name: Loadpoint battery boost mode switch
+      description: |
+        The `switch` allowing to enable the battery boost.
+        You can add multiple loadpoints, and omit those you don't want to reset automatically.
+      selector:
+        object:
+          multiple: true
+          label_field: entity
+          fields:
+            entity:
+              label: "Loadpoint mode select entity"
+              required: true
+              selector:
+                entity:
+                  domain: switch
+      default: [ ]
+    battery_boost_mode_reset_interval:
+      name: Loadpoint battery boost mode reset interval
+      description: The time after which the loadpoint battery boost should be reset to `off`
+      selector:
+        duration:
+      default:
+        hours: 2
+        minutes: 0
+        seconds: 0
+
+trigger:
+  - platform: time_pattern
+    minutes: '/5'
+
+variables:
+  input_loadpoint_mode_select: !input loadpoint_mode_select
+  input_battery_boost_mode_switch: !input battery_boost_mode_switch
+  input_loadpoint_mode_reset_interval: !input loadpoint_mode_reset_interval
+  input_battery_boost_mode_reset_interval: !input battery_boost_mode_reset_interval
+
+action:
+  - repeat:
+      for_each: '{{ input_loadpoint_mode_select }}'
+      sequence:
+        - if:
+            - condition: or
+              conditions:
+                - condition: template
+                  value_template: >
+                    {% set reset_interval = timedelta(**input_loadpoint_mode_reset_interval) %}
+                    {{ not is_state(repeat.item.entity, "pv") and (now() - states[repeat.item.entity].last_changed) > reset_interval }}
+          then:
+            - action: select.select_option
+              data:
+                entity_id: >
+                  {{ repeat.item.entity }}
+                option: "pv"
+
+  - repeat:
+      for_each: '{{ input_battery_boost_mode_switch }}'
+      sequence:
+        - if:
+            - condition: template
+              value_template: >
+                {% set reset_interval = timedelta(**input_battery_boost_mode_reset_interval) %}
+                {{ is_state(repeat.item.entity, "on") and (now() - states[repeat.item.entity].last_changed) > reset_interval }}
+          then:
+            - action: switch.turn_off
+              data:
+                entity_id: '{{ repeat.item.entity }}'
