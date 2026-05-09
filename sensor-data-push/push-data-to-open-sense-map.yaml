@@ -1,0 +1,114 @@
+blueprint:
+  name: Push Sensor Data to openSenseMap
+  description: |
+    ### Overview
+    
+    Push sensor values from Home Assistant to a senseBox on
+    [openSenseMap](https://opensensemap.org) by posting a new measurement
+    for each configured sensor.
+    
+    Make sure that the type and unit of measurement of the sensor in Home Assistant matches the data configured
+    in openSenseMap. Only the raw value is transmitted, everything else must be configured manually.
+    
+    ### Prerequisites
+    
+    As a prerequisite for this automation to work, you need to add the following snippet to your `configuration.yaml`:
+    
+    ```yaml
+    rest_command:
+      push_measurement_to_opensensemap:
+        url: "https://api.opensensemap.org/boxes/{{ sensebox_id }}/{{ sensor_id }}"
+        method: POST
+        headers:
+          Authorization: '{{ access_token }}'
+          Content-Type: "application/json"
+        payload: '{"value": "{{ value }}"}'
+    ```
+    
+    ### How it works
+
+    For each entry in the `sensors` list, an HTTP POST request is sent to `https://api.opensensemap.org/boxes/{senseBoxId}/{sensorId}`
+    with the current value of the configured entity (see the [openSenseMap API Spec](https://sensebox.github.io/openSenseMap-API/#api-Measurements-postNewMeasurement)).
+
+  domain: automation
+  input:
+    trigger:
+      name: Trigger
+      description: |
+        The trigger that determines when measurements are sent to openSenseMap.
+      default:
+        - platform: time_pattern
+          minutes: "/5"
+      selector:
+        trigger:
+    sensebox_id:
+      name: senseBox ID
+      selector:
+        text:
+    access_token:
+      name: Access token
+      description: |
+        Optional access token for the senseBox. Required for boxes with restricted access.
+        Will be sent as `Authorization` header.
+      default: ""
+      selector:
+        text:
+    sensors:
+      name: Sensors
+      description: |
+        List of sensors of the senseBox to push data to.
+      default: [ ]
+      selector:
+        object:
+          multiple: true
+          label_field: id
+          description_field: value
+          fields:
+            id:
+              label: Sensor ID
+              required: true
+              selector:
+                text:
+            value:
+              label: Value entity
+              required: true
+              selector:
+                entity:
+                  domain: sensor
+
+variables:
+  input_sensebox_id: !input sensebox_id
+  input_access_token: !input access_token
+  input_sensors: !input sensors
+
+trigger: !input trigger
+
+action:
+  - repeat:
+      for_each: "{{ input_sensors }}"
+      sequence:
+        - variables:
+            sensor_id: "{{ repeat.item.id }}"
+            sensor_entity: "{{ repeat.item.value }}"
+            sensor_value: "{{ states(sensor_entity) }}"
+        - condition: template
+          value_template: >
+            {{ sensor_id is string and sensor_id | length > 0
+               and sensor_value not in ['unknown', 'unavailable', 'none', None]
+               and (sensor_value | is_number) }}
+        - action: rest_command.push_measurement_to_opensensemap
+          response_variable: my_response
+          data:
+            sensebox_id: "{{ input_sensebox_id }}"
+            sensor_id: "{{ sensor_id }}"
+            value: "{{ sensor_value }}"
+            access_token: "{{ input_access_token }}"
+        - action: system_log.write
+          data:
+            message: "{{ my_response|to_json }}"
+            level: info
+
+mode: single
+max_exceeded: silent
+
+
