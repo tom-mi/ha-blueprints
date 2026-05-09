@@ -1,0 +1,146 @@
+blueprint:
+  name: Push Sensor Data to Sensor.Community
+  description: |
+    ### Overview
+
+    Push sensor values from Home Assistant to a measurement station on [Sensor.Community](https://sensor.community)
+    by POSTing to the `/v1/push-sensor-data/` endpoint.
+
+    Make sure that the type and unit of measurement of the entity in Home Assistant matches what
+    Sensor.Community expects for the configured `value_type` (e.g. PM values in µg/m³,
+    temperature in °C, pressure in Pa, humidity in %). Only the raw value is transmitted,
+    everything else must be configured manually.
+
+    See the [source code of the API endpoint](https://github.com/opendata-stuttgart/feinstaub-api/blob/master/feinstaub/sensors/models.py)
+    for possible `value_type` values.
+
+    ### Prerequisites
+
+    As a prerequisite for this automation to work, you need to add the following snippet to your `configuration.yaml`:
+
+    ```yaml
+    rest_command:
+      push_measurement_to_sensor_community:
+        url: "https://api.sensor.community/v1/push-sensor-data/"
+        method: POST
+        headers:
+          X-Sensor: "{{ x_sensor }}"
+          X-Pin: "{{ x_pin }}"
+          Content-Type: "application/json"
+        payload: '{{ payload }}'
+    ```
+
+    You also need to register your measurement station at
+    [https://devices.sensor.community/sensors/register](https://devices.sensor.community/sensors/register)
+    to obtain a `Sensor UID`.
+
+    ### How it works
+
+    On every trigger, the configured Home Assistant entities are read and grouped by their
+    `pin`. For each unique pin, a single HTTP POST request is sent to
+    `https://api.sensor.community/v1/push-sensor-data/` with the `X-Sensor` and `X-Pin` headers
+    and a JSON body of the form
+    `{"sensordatavalues": [{"value_type": "...", "value": "..."}, ...]}`
+    (see the [unofficial API spec](https://api-sensor-community.bessarabov.com/#/api/post_v1_push_sensor_data_)
+    and the [official documentation](https://github.com/opendata-stuttgart/meta/wiki/EN-APIs)).
+
+  domain: automation
+  input:
+    trigger:
+      name: Trigger
+      description: |
+        The trigger that determines when measurements are sent to Sensor.Community.
+      default:
+        - platform: time_pattern
+          minutes: "/5"
+      selector:
+        trigger:
+    sensor_uid:
+      name: Sensor UID
+      description: |
+        The `StationUniqID` / Sensor UID of your measurement station, sent as the `X-Sensor` HTTP header.
+        Examples: `esp8266-123456789`, `raspi-3b4838fa`.
+      selector:
+        text:
+    sensor_data_values:
+      name: Sensor data values
+      description: |
+        List of measurement values to push.
+      default: [ ]
+      selector:
+        object:
+          multiple: true
+          label_field: value_type
+          description_field: value
+          fields:
+            value:
+              label: Value entity
+              required: true
+              selector:
+                entity:
+                  domain: sensor
+            value_type:
+              label: Value type
+              required: true
+              selector:
+                text:
+            pin:
+              label: Sensor pin
+              required: true
+              selector:
+                number:
+                  min: 1
+                  max: 255
+                  step: 1
+                  mode: box
+
+variables:
+  input_sensor_uid: !input sensor_uid
+  input_sensor_data_values: !input sensor_data_values
+
+  # Build a mapping { pin: [ {value_type, value}, ... ] } from the configured items,
+  # filtering out entries with missing pin/value_type/entity or unavailable/non-numeric states.
+  values_by_pin: >
+    {% set ns = namespace(groups={}) %}
+    {% for item in input_sensor_data_values %}
+      {% set value_type = item.value_type %}
+      {% set entity = item.value %}
+      {% set pin = item.pin %}
+      {% set state = states(entity) if entity else None %}
+      {% if value_type and entity and pin is not none
+            and state not in ['unknown', 'unavailable', 'none', None]
+            and (state | is_number) %}
+        {% set pin_key = pin | string %}
+        {% set existing = ns.groups.get(pin_key, []) %}
+        {% set ns.groups = dict(ns.groups, **{pin_key: existing + [{'value_type': value_type, 'value': state}]}) %}
+      {% endif %}
+    {% endfor %}
+    {{ ns.groups }}
+
+trigger: !input trigger
+
+condition:
+  - condition: template
+    value_template: "{{ (values_by_pin | length) > 0 }}"
+
+action:
+  - repeat:
+      for_each: "{{ values_by_pin | dictsort }}"
+      sequence:
+        - variables:
+            current_pin: "{{ repeat.item[0] }}"
+            current_values: "{{ repeat.item[1] }}"
+        - action: rest_command.push_measurement_to_sensor_community
+          response_variable: my_response
+          data:
+            x_sensor: "{{ input_sensor_uid }}"
+            x_pin: "{{ current_pin }}"
+            payload: >
+              {{ {'sensordatavalues': current_values} | to_json }}
+        - action: system_log.write
+          data:
+            message: "X-Pin {{ current_pin }}: {{ my_response|to_json }}"
+            level: info
+
+mode: single
+max_exceeded: silent
