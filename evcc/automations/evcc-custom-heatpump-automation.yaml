@@ -1,0 +1,213 @@
+blueprint:
+  name: evcc Custom Heatpump automation
+  description: |
+    * Forward sensor data from Home Assistant to evcc via MQTT
+    * Forward control commands (max power) from EVCC to Home Assistant via MQTT
+    
+    Configure all entities accordingly and choose a MQTT topic that you also set up in evcc.
+    
+    In EVCC, create a new "User-defined heat pump" device and add the following configuration (adapt the MQTT topic prefix):
+    ```yaml
+    ## Customize icon if you want -> https://docs.evcc.io/en/reference/configuration/vehicles/#icon
+    #icon: heater
+    #icon: waterheater
+
+    ## required attributes [type: heatpump]
+
+    setmaxpower: # update the maximum heating power
+      source: mqtt
+      topic: 'ha-evcc/my-heatpump/setmaxpower'
+
+    ## optional attributes (read-only)
+
+    getmaxpower: # heating power in W
+      source: mqtt
+      topic: 'ha-evcc/my-heatpump/getmaxpower'
+      timeout: 30s
+    power: # heating power in W
+      source: mqtt
+      topic: 'ha-evcc/my-heatpump/power'
+      timeout: 30s
+    energy: # meter reading in kWh
+      source: mqtt
+      topic: 'ha-evcc/my-heatpump/energy'
+      timeout: 30s
+    temp: # current temperature (°C)
+      source: mqtt
+      topic: 'ha-evcc/my-heatpump/temp'
+      timeout: 30s
+    limittemp: # temperature limit (°C) configured in device
+      source: mqtt
+      topic: 'ha-evcc/my-heatpump/limittemp'
+      timeout: 30s
+    ```
+
+  domain: automation
+
+  input:
+    mqtt_prefix:
+      name: MQTT prefix
+      description: |
+        The MQTT topic prefix used by the evcc MQTT integration. This is needed to determine the correct topics for
+        sending data to evcc, e.g. `ha-evcc/my-heatpump`.
+      selector:
+        text:
+
+    maxpower_entity:
+      name: Set max power in W
+      description: Number entity that can be turned on to set the max power to a certain value (defined in evcc).
+      selector:
+        entity:
+          domain: number
+          device_class: power
+
+    power_entity:
+      name: Current power in W or kW (optional)
+      description: Sensor that reports the current power consumed by the device.
+      selector:
+        entity:
+          domain: sensor
+          device_class: power
+      default:
+
+    energy_entity:
+      name: Energy consumed in Wh or kWh (optional)
+      description: Sensor that reports the total energy consumed by the device.
+      selector:
+        entity:
+          domain: sensor
+          device_class: energy
+      default:
+
+
+    temp_entity:
+      name: Current temperature in °C (optional)
+      description: Sensor that reports the current temperature of the device.
+      selector:
+        entity:
+          domain: sensor
+          device_class: temperature
+      default:
+
+    limittemp_entity:
+      name: Temperature limit in °C (optional)
+      description: Sensor that reports the temperature limit of the device.
+      selector:
+        entity:
+          domain: sensor
+          device_class: temperature
+      default:
+
+    trigger:
+      name: Trigger
+      description: |
+        The trigger that determines when measurements are sent to evcc.
+      default:
+        - platform: time_pattern
+          seconds: "/15"
+      selector:
+        trigger:
+
+trigger_variables:
+  input_mqtt_prefix: !input mqtt_prefix
+  setmaxpower_topic: '{{ input_mqtt_prefix }}/setmaxpower'
+
+trigger:
+  - triggers: !input trigger
+  - platform: mqtt
+    topic: '{{ setmaxpower_topic }}'
+
+variables:
+  input_maxpower_entity: !input maxpower_entity
+  input_power_entity: !input power_entity
+  input_energy_entity: !input energy_entity
+  input_temp_entity: !input temp_entity
+  input_limittemp_entity: !input limittemp_entity
+
+
+  sensor_readings: >
+    {%- macro determine_reading(entity_id) -%}
+      {%- if entity_id is not none -%}
+        {%- set state = states(entity_id) -%}
+        {%- set unit = state_attr(entity_id, 'unit_of_measurement') -%}
+        {%- if state not in ['unknown', 'unavailable', 'none', None] and (state | is_number) -%}
+          {%- if unit in ['kW'] -%}
+            {{ (state | float) * 1000 }}
+          {%- elif unit in ['Wh'] -%}
+            {{ (state | float) / 1000 }}
+          {%- else -%}
+            {{ state | float }}
+          {%- endif -%}
+        {%- else -%}
+          null
+        {%- endif -%}
+      {%- else -%}
+        null
+      {%- endif -%}
+    {%- endmacro -%}
+    {{
+      dict({
+        'getmaxpower': determine_reading(input_maxpower_entity) | from_json,
+        'power': determine_reading(input_power_entity) | from_json,
+        'energy': determine_reading(input_energy_entity) | from_json,
+        'temp': determine_reading(input_temp_entity) | from_json,
+        'limittemp': determine_reading(input_limittemp_entity) | from_json,
+      }.items() | rejectattr('1', 'equalto', None))
+    }}
+
+action:
+  - if:
+      - condition: template
+        value_template: "{{ trigger.platform == 'mqtt' and trigger.topic == setmaxpower_topic }}"
+    then:
+      - variables:
+          new_maxpower: >
+            {% if trigger.payload_json is number %}
+              {% set unit = state_attr(input_maxpower_entity, 'unit_of_measurement') %}
+                {% if unit in ['kW'] %}
+                  {% set value_w = trigger.payload_json * 1000 %}
+                {% else %}
+                  {% set value_w = trigger.payload_json %}
+                {% endif %}
+                {% set min_value = state_attr(input_maxpower_entity, 'min') | float(0) %}
+                {% set max_value = state_attr(input_maxpower_entity, 'max') | float(999999) %}
+                {{ clamp(value_w, min_value, max_value) }}
+            {% else %}
+                null
+            {% endif %}
+      - action: mqtt.publish
+        data:
+          topic: '{{ input_mqtt_prefix }}/debug'
+          payload: |
+            --- debug info of evcc-custom-heatpump-automation -------------------
+            Trigger: {{ trigger }}
+            Updating {{ input_maxpower_entity }} to {{ new_maxpower }}
+            ---------------------------------------------------------------------
+      - action: number.set_value
+        target:
+          entity_id: '{{ input_maxpower_entity }}'
+        data:
+          value: '{{ new_maxpower }}'
+    else:
+      - action: mqtt.publish
+        data:
+          topic: '{{ input_mqtt_prefix }}/debug'
+          payload: |
+            --- debug info of evcc-custom-heatpump-automation -------------------
+            Trigger: {{ trigger }}
+            Updating the following sensor readings to evcc:
+            {{ sensor_readings }}
+            ---------------------------------------------------------------------
+
+      - repeat:
+          for_each: "{{ sensor_readings | dictsort }}"
+          sequence:
+            - variables:
+                current_key: "{{ repeat.item[0] }}"
+                current_value: "{{ repeat.item[1] }}"
+            - action: mqtt.publish
+              data:
+                topic: '{{ input_mqtt_prefix }}/{{ current_key }}'
+                payload: '{{ current_value }}'
+                retain: true
+

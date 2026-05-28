@@ -1,0 +1,32 @@
+## Customize icon if you want -> https://docs.evcc.io/en/reference/configuration/vehicles/#icon
+#icon: heater
+#icon: waterheater
+
+## required attributes [type: heatpump]
+
+setmaxpower: # update the maximum heating power
+  source: mqtt
+  topic: 'ha-evcc/my-heatpump/setmaxpower'
+
+## optional attributes (read-only)
+
+getmaxpower: # heating power in W
+  source: mqtt
+  topic: 'ha-evcc/my-heatpump/getmaxpower'
+  timeout: 30s
+power: # heating power in W
+  source: mqtt
+  topic: 'ha-evcc/my-heatpump/power'
+  timeout: 30s
+energy: # meter reading in kWh
+  source: mqtt
+  topic: 'ha-evcc/my-heatpump/energy'
+  timeout: 30s
+temp: # current temperature (°C)
+  source: mqtt
+  topic: 'ha-evcc/my-heatpump/temp'
+  timeout: 30s
+limittemp: # temperature limit (°C) configured in device
+  source: mqtt
+  topic: 'ha-evcc/my-heatpump/limittemp'
+  timeout: 30s
