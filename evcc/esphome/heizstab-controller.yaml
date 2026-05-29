@@ -1,0 +1,368 @@
+logger:
+
+api:
+  encryption:
+    key: !secret api_key
+
+ota:
+  - platform: esphome
+    password: !secret ota_password
+
+web_server:
+  port: 80
+  auth:
+    username: admin
+    password: !secret web_server_password
+
+time:
+  - platform: homeassistant
+    id: homeassistant_time
+    timezone: Europe/Berlin
+
+substitutions:
+  max_power: "3000.0"       # Maximum power in Watts
+  min_voltage: "1.0"        # Minimum voltage mapped to 0W
+  max_voltage: "3.2"        # Maximum output voltage mapped to max_power
+  dac_max_voltage: "3.3"    # Maximum voltage output of the DAC
+  step_value: "10"          # Power step increment
+  heizstab_power_level_name: "Heizstab Max Power"
+
+esphome:
+  name: heizstab-controller
+  friendly_name: "Heizstab"
+
+esp32:
+  board: esp32-poe-iso
+
+ethernet:
+  type: LAN8720
+  mdc_pin: GPIO23
+  mdio_pin: GPIO18
+  clk_mode: GPIO17_OUT
+  phy_addr: 0
+  power_pin: GPIO12
+
+
+### Output 0..3.3V voltage to control max power ###
+
+i2c:
+  sda: GPIO13
+  scl: GPIO16
+  scan: True
+
+output:
+  - platform: mcp4725
+    id: heizstab_dac
+
+number:
+  - platform: template
+    name: ${heizstab_power_level_name}
+    id: heizstab_target_power
+    optimistic: true
+    min_value: 0
+    max_value: ${max_power}
+    step: ${step_value}
+    device_class: power
+    unit_of_measurement: "W"
+    on_value:
+      then:
+        - lambda: |-
+            // Map current power state to the target voltage ratio
+            float target_power = id(heizstab_target_power).state;
+            
+            float dac_level = 0;
+            if (target_power >= ${max_power}) {
+              dac_level = 1;
+            } else if (target_power > 0) {
+              float target_voltage = (target_power / ${max_power}) * (${max_voltage} - ${min_voltage}) + ${min_voltage};
+              // Map target voltage to 0.0 - 1.0 internal percentage
+              dac_level = target_voltage / ${dac_max_voltage}; 
+            }
+            
+            id(heizstab_dac).set_level(dac_level);
+
+#### read sensor data from VBUS ###
+
+uart:
+  rx_pin:
+    number: GPIO32
+    mode:
+      input: true
+  baud_rate: 9600
+  id: uart_vbus
+#  debug:
+#    direction: RX
+#    dummy_receiver: false
+#    debug_prefix: "[VBUS] "
+#    after:
+#      timeout: 250ms
+#      bytes: 500
+#    sequence:
+#      - lambda: UARTDebug::log_hex(direction, bytes, ' ', debug_prefix);
+
+vbus:
+  uart_id: uart_vbus
+
+sensor:
+  - platform: vbus
+    model: custom
+    source: 0x111E
+    dest: 0x0010
+    command: 0x0100
+    sensors:
+#      # ---- Debug: hex-dump the raw decoded payload ----------------------------
+#      - id: debug
+#        internal: true
+#        name: "VBUS Debug"
+#        lambda: |-
+#          std::string result;
+#          for (size_t i = 0; i < x.size(); i++) {
+#            char buf[4];
+#            snprintf(buf, sizeof(buf), "%02X ", x[i]);
+#            result += buf;
+#          }
+#          ESP_LOGD("vbus", "[VBUS_DECODED]: %s", result.c_str());
+#          return 0;
+
+      # ---- Offset 0 : operating state bitmask --------------------------------
+      - id: vbus_operating_state
+        name: "Operating State (raw)"
+        internal: true
+        lambda: return x[0];
+        unit_of_measurement: ""
+        accuracy_decimals: 0
+        on_value:
+          then:
+            - component.update: vbus_operating_state_text
+
+      # ---- Offsets 2..5 : Power Excess  [W]  (×0.001) ------------------------
+      - id: vbus_power_excess
+        name: "Power Excess"
+        unit_of_measurement: "W"
+        accuracy_decimals: 1
+        device_class: power
+        state_class: measurement
+        lambda: |-
+          uint32_t raw = x[2] | (x[3] << 8) | (x[4] << 16) | (x[5] << 24);
+          return raw * 0.001f;
+
+      # ---- Offsets 6..9 : Power Heating  [W]  (×0.001) -----------------------
+      - id: vbus_power_heating
+        name: "Power Heating"
+        unit_of_measurement: "W"
+        accuracy_decimals: 1
+        device_class: power
+        state_class: measurement
+        lambda: |-
+          uint32_t raw = x[6] | (x[7] << 8) | (x[8] << 16) | (x[9] << 24);
+          return raw * 0.001f;
+
+      # ---- Offsets 10..11 : Temperature Store / Sensor 1  [°C]  (×0.1) -------
+      - id: vbus_temp_store_s1
+        name: "Temperature Store (S1)"
+        unit_of_measurement: "°C"
+        accuracy_decimals: 1
+        device_class: temperature
+        state_class: measurement
+        lambda: |-
+          int16_t raw = (int16_t)(x[10] | (x[11] << 8));
+          if (raw == 8888) {
+            return NAN;
+          }
+          return raw * 0.1f;
+
+      # ---- Offsets 12..13 : Temperature Sensor 2  [°C]  (×0.1) ---------------
+      - id: vbus_temp_sensor_2
+        name: "Temperature Sensor 2"
+        unit_of_measurement: "°C"
+        accuracy_decimals: 1
+        device_class: temperature
+        state_class: measurement
+        lambda: |-
+          int16_t raw = (int16_t)(x[12] | (x[13] << 8));
+          if (raw == 8888) {
+            return NAN;
+          }
+          return raw * 0.1f;
+
+      # ---- Offsets 14..15 : Temperature Sensor 3  [°C]  (×0.1) ---------------
+      - id: vbus_temp_sensor_3
+        name: "Temperature Sensor 3"
+        unit_of_measurement: "°C"
+        accuracy_decimals: 1
+        device_class: temperature
+        state_class: measurement
+        lambda: |-
+          int16_t raw = (int16_t)(x[14] | (x[15] << 8));
+          if (raw == 8888) {
+            return NAN;
+          }
+          return raw * 0.1f;
+
+      # ---- Offsets 16..19 : Energy Excess  [Wh] -------------------------------
+      - id: vbus_energy_excess
+        name: "Energy Excess"
+        unit_of_measurement: "Wh"
+        accuracy_decimals: 0
+        device_class: energy
+        state_class: total_increasing
+        lambda: |-
+          uint32_t raw = x[16] | (x[17] << 8) | (x[18] << 16) | (x[19] << 24);
+          return (float)raw;
+
+      # ---- Offsets 24..27 : Energy Heating  [Wh] ------------------------------
+      - id: vbus_energy_heating
+        name: "Energy Heating"
+        unit_of_measurement: "Wh"
+        accuracy_decimals: 0
+        device_class: energy
+        state_class: total_increasing
+        lambda: |-
+          uint32_t raw = x[24] | (x[25] << 8) | (x[26] << 16) | (x[27] << 24);
+          return (float)raw;
+
+      # ---- Offsets 32..35 : Operating time heating  [h] -----------------------
+      - id: vbus_op_time_heating
+        name: "Operating Time Heating"
+        unit_of_measurement: "h"
+        accuracy_decimals: 0
+        state_class: total_increasing
+        lambda: |-
+          uint32_t raw = x[32] | (x[33] << 8) | (x[34] << 16) | (x[35] << 24);
+          return (float)raw;
+
+      # ---- Offsets 36..37 : Parameter Max. temp. S1  [°C]  (×0.1) ------------
+      - id: vbus_param_max_temp_s1
+        name: "Param Max. Temp. S1"
+        unit_of_measurement: "°C"
+        accuracy_decimals: 1
+        device_class: temperature
+        lambda: |-
+          int16_t raw = (int16_t)(x[36] | (x[37] << 8));
+          return raw * 0.1f;
+
+      # ---- Offsets 40..41 : Parameter Reserve  [W] ----------------------------
+      - id: vbus_param_reserve
+        name: "Param Reserve"
+        unit_of_measurement: "W"
+        accuracy_decimals: 0
+        device_class: power
+        lambda: |-
+          int16_t raw = (int16_t)(x[40] | (x[41] << 8));
+          return (float)raw;
+
+      # ---- Offsets 44..47 : System date (raw) ---------------------------------
+      - id: vbus_system_date
+        name: "System Date (raw)"
+        internal: true
+        lambda: |-
+          uint32_t raw = x[44] | (x[45] << 8) | (x[46] << 16) | (x[47] << 24);
+          return (float)raw;
+
+      # ---- Offset 48 : Error flags (raw bitmask) ------------------------------
+      - id: vbus_error_flags
+        name: "Error Flags (raw)"
+        internal: true
+        accuracy_decimals: 0
+        lambda: return x[48];
+        on_value:
+          then:
+            - component.update: vbus_error_flags_text
+
+      # ---- Offset 52 : Warning flags (raw bitmask) ----------------------------
+      - id: vbus_warning_flags
+        name: "Warning Flags (raw)"
+        internal: true
+        accuracy_decimals: 0
+        lambda: return x[52];
+        on_value:
+          then:
+            - component.update: vbus_warning_flags_text
+
+      # ---- Offsets 56..59 : Energy Backup Heating  [Wh] -----------------------
+      - id: vbus_energy_backup_heating
+        name: "Energy Backup Heating"
+        unit_of_measurement: "Wh"
+        accuracy_decimals: 0
+        device_class: energy
+        state_class: total_increasing
+        lambda: |-
+          uint32_t raw = x[56] | (x[57] << 8) | (x[58] << 16) | (x[59] << 24);
+          return (float)raw;
+
+      # ---- Offsets 64..67 : Operating time backup heating  [h] ----------------
+      - id: vbus_op_time_backup_heating
+        name: "Operating Time Backup Heating"
+        unit_of_measurement: "h"
+        accuracy_decimals: 0
+        state_class: total_increasing
+        lambda: |-
+          uint32_t raw = x[64] | (x[65] << 8) | (x[66] << 16) | (x[67] << 24);
+          return (float)raw;
+
+      # ---- Offsets 68..69 : DC Input voltage  [V]  (×0.1) ---------------------
+      - id: vbus_dcin
+        name: "DCIn"
+        unit_of_measurement: "V"
+        accuracy_decimals: 1
+        device_class: voltage
+        state_class: measurement
+        lambda: |-
+          uint16_t raw = x[68] | (x[69] << 8);
+          return raw * 0.1f;
+
+text_sensor:
+  - platform: template
+    name: "Operating State"
+    id: vbus_operating_state_text
+    update_interval: never
+    lambda: |-
+      uint8_t b = (uint8_t) id(vbus_operating_state).state;
+      std::string result;
+      auto append = [&](const char* s) {
+        if (!result.empty()) result += ", ";
+        result += s;
+      };
+      if (b & 0x01) append("Off");
+      if (b & 0x02) append("Error");
+      if (b & 0x04) append("Ready");
+      if (b & 0x08) append("Heating");
+      if (b & 0x40) append("Backup heating");
+      if (b & 0x10) append("Max. temp.");
+      if (b & 0x20) append("Power reduced");
+      if (result.empty()) result = "Unknown";
+      return result;
+
+  - platform: template
+    name: "Error Flags"
+    id: vbus_error_flags_text
+    update_interval: never
+    lambda: |-
+      uint8_t b = (uint8_t) id(vbus_error_flags).state;
+      std::string result;
+      auto append = [&](const char* s) {
+        if (!result.empty()) result += ", ";
+        result += s;
+      };
+      if (b & 0x01) append("Sensor fault");
+      if (b & 0x02) append("Bus communication disturbed");
+      if (b & 0x04) append("Fan fault");
+      if (b & 0x08) append("Max. temp. controller");
+      if (b & 0x10) append("Date/Time");
+      if (result.empty()) result = "OK";
+      return result;
+
+  - platform: template
+    name: "Warning Flags"
+    id: vbus_warning_flags_text
+    update_interval: never
+    lambda: |-
+      uint8_t b = (uint8_t) id(vbus_warning_flags).state;
+      std::string result;
+      auto append = [&](const char* s) {
+        if (!result.empty()) result += ", ";
+        result += s;
+      };
+      if (b & 0x04) append("Fan warning");
+      if (result.empty()) result = "OK";
+      return result;
