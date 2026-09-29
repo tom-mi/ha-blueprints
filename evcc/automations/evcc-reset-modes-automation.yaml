@@ -1,7 +1,7 @@
 blueprint:
   name: evcc Reset Modes automation
   description: |
-    * Reset the mode of a loadpoint to "PV" after a given interval
+    * Reset the mode of a loadpoint to "Smart" after a given interval
     * Reset the battery boost mode to "Off" after a given interval
     
     This is built to be compatible with the [ha-evcc](https://github.com/marq24/ha-evcc) integration,
@@ -12,7 +12,7 @@ blueprint:
     loadpoint_mode_select:
       name: Loadpoint mode select
       description: |
-        The `select` choosing between the loadpoint modes `off`, `pv`, `minpv` and `now`.
+        The `select` choosing between the loadpoint modes `off`, `smart` and `now`.
         You can add multiple loadpoints, and omit those you don't want to reset automatically.
       selector:
         object:
@@ -28,7 +28,7 @@ blueprint:
       default: [ ]
     loadpoint_mode_reset_interval:
       name: Loadpoint mode reset interval
-      description: The time after which the loadpoint mode should be reset to `pv`
+      description: The time after which the loadpoint mode should be reset to `smart`
       selector:
         duration:
       default:
@@ -82,13 +82,13 @@ action:
                 - condition: template
                   value_template: >
                     {% set reset_interval = timedelta(**input_loadpoint_mode_reset_interval) %}
-                    {{ not is_state(repeat.item.entity, "pv") and (now() - states[repeat.item.entity].last_changed) > reset_interval }}
+                    {{ not is_state(repeat.item.entity, "smart") and (now() - states[repeat.item.entity].last_changed) > reset_interval }}
           then:
             - action: select.select_option
               data:
                 entity_id: >
                   {{ repeat.item.entity }}
-                option: "pv"
+                option: "smart"
 
   - repeat:
       for_each: '{{ input_battery_boost_mode_switch }}'
